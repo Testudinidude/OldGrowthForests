@@ -1,0 +1,405 @@
+---
+title: "Old Growth Forests"
+author: "Nathan Byer, Connie Hausman"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    fig_width: 6
+    fig_height: 4
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+runtime: shiny
+---
+
+```{r, echo = FALSE,warning=FALSE,error=FALSE,message=FALSE}
+detachAllPackages <- function() {
+  basic.packages.blank <- c(    
+    "stats",    
+    "graphics",    
+    "grDevices",    
+    "utils",   
+    "datasets",  
+    "methods",    
+    "base"    
+  )    
+  basic.packages <- paste("package:", basic.packages.blank, sep = "")   
+  package.list <- search()[ifelse(unlist(gregexpr("package:", search())) == 1, TRUE, FALSE)]   
+  package.list <- setdiff(package.list, basic.packages)   
+  if (length(package.list) > 0) {   
+    for (package in package.list) {   
+      detach(package, character.only = TRUE)   
+    }   
+  }    
+}
+
+detachAllPackages()
+library(ggplot2)
+library(dotwhisker)
+library(dplyr)
+library(tidyverse)
+library(vegan)
+library(caret)
+library(lubridate)
+library(spOccupancy)
+library(vegan)
+library(raster)
+library(dismo)
+library(terra)
+library(sp)
+library(rgdal)
+library(gstat)
+library(broom)
+library(shiny)
+library(sp)
+library(ggplot2)
+library(RColorBrewer)
+library(rgdal)
+library(broom)
+library(AICcmodavg)
+library(indicspecies)
+library(lme4)
+library(MASS)
+library(cooccur)
+library(igraph)
+library(visNetwork)
+library(lubridate)
+library(performance)
+library(glmmTMB)
+library(AICcmodavg)
+library('ggplot2')
+library('glmmTMB')
+library('ggeffects')
+library(sjPlot)
+library(dotwhisker)
+library(effects)
+library(chron)
+library(dplyr)
+library(tidyverse)
+library(sf)
+library(nngeo)
+library(factoextra)
+
+
+#options(repos = c(
+#    fawda123 = 'https://fawda123.r-universe.dev',
+#    CRAN = 'https://cloud.r-project.org'))
+
+# Install ggord
+#install.packages('ggord')
+library(ggord)
+
+#code from here: https://www.r-bloggers.com/2011/11/outersect-the-opposite-of-rs-intersect-function/#:~:text=setdiff()%20produces%20all%20elements,vector%20(i.e.%20is%20asymmetric).
+outersect <- function(x, y, ...) {
+  big.vec <- c(x, y, ...)
+  duplicates <- big.vec[duplicated(big.vec)]
+  setdiff(big.vec, unique(duplicates))
+}
+
+```
+
+
+
+The following represents initial, draft attempts to evaluate plots across CMP that could be characterized as "old growth". In 2013, the Old Growth Forest Network was established - to inventory old growth forests across the country. Given the Biden-Harris executive order for old growth forest protection, renewed interest in inventorying and evaluating what consitutes "old growth" could provide novel insights into which portions of our parks may classify as "old growth". While forest ecologists in Pennsylvania have developed a rapid assessment method for old growth forests, we have not designed our Plant Community Assessment Program (PCAP) around this method - so will instead extract some salient covariates that may indicate old growth forest potential. These are all primarily plot/landscape-scale measures, and will be evaluated as follows:
+•	*Old growth forests contain diverse woody debris*:  – we have CWD information - based on counts of sizes. 
+•	*Old growth forests contain pit and mound topography* – minimal land use impacts evident from this. We have counts for depressions to indicate this.
+•	*Old growth trees have a high density of trees by acre* - we are using canopy tree dominance and density information.
+
+These covariate lists are subject to change, as these represent imperfect proxies at present.
+
+# 1. Feeding in initial data
+
+Rather than create a **de novo** query for this, I am drawing from two derived data products - a list of PCAP covariates for the recent BBS manuscript (using second sample, 2015-2019), and plot-level covariates provided for Dr. Katie Flinn's research on land use change (also using second sample, 2015-2019). 
+
+```{r}
+BBScovariates<-read.csv("bbs_covariates_2024.csv",header=T)
+Flinncovariates<-read.csv("PlotLevelData_FlinnRequest.csv",header=T)
+
+```
+
+# 2. Selecting specific covariates
+
+Let's grab some initial covariates for exploration. 
+
+```{r}
+
+Covars_oldgrowth<-Flinncovariates %>%
+  left_join(BBScovariates,by="simp_plot") %>%
+  dplyr::select(simp_plot,macro_depressions_count_mean,cwd_2to12cm_mean,cwd_12to40cm_mean,cwd_greater_than_40cm_mean,topographic_wetness_index,canopy_dens,canopy_dom,subcanopy_dens,subcanopy_dom) %>% 
+  mutate(across(everything(), ~replace_na(.x, 0))) %>% 
+  distinct_all() %>% 
+  column_to_rownames("simp_plot")
+
+```
+
+# 3. translating our values into index scores
+
+## a. diverse coarse woody debris
+
+1 = 1 decay class
+2 = 2 decay classes
+3 = 3 or more decay classes
+
+```{r}
+
+cwd_class1<-Covars_oldgrowth$cwd_2to12cm_mean 
+cwd_class2<-Covars_oldgrowth$cwd_12to40cm_mean 
+cwd_class3<-Covars_oldgrowth$cwd_greater_than_40cm_mean 
+
+cwd_classes<-data.frame(cwd_class1,cwd_class2,cwd_class3) %>% mutate_if(is.numeric, ~1 * (. > 0))
+
+cwd_combined<-cwd_classes$cwd_class1+cwd_classes$cwd_class2+cwd_classes$cwd_class3
+
+
+Covars_oldgrowth <- Covars_oldgrowth %>%
+  rownames_to_column("simp_plot")
+Covars_oldgrowth$cwd_score<-cwd_combined
+
+```
+
+
+## b. pit and mound topography
+
+0 = none,
+1 = 1-2 pits/mound
+2 = 3 or more
+
+```{r}
+macro_simplified<-Covars_oldgrowth$macro_depressions_count_mean
+macro_simplified[macro_simplified > 0 & macro_simplified < 2.9]<- 1
+macro_simplified[macro_simplified > 2.9]<- 2
+
+
+Covars_oldgrowth$macro_simplified<-macro_simplified
+
+```
+
+## c. live basal area
+
+1 = < 110 ft2/ac
+2 = 110-179 ft2/ac
+3 = > 180 ft2/ac
+
+cm2/ha to ft2/ac
+cm2 --> ft2 = 0.00107639 
+ha --> ac = 2.47 
+
+0.001/2.47 = 0.0004 conversion factor to get from cm2/ha to ft2/ac
+
+
+```{r}
+basalarea_byarea<-read.csv("basal_converted.csv",header=T)
+basalarea_byarea_2ndcycle<-basalarea_byarea[basalarea_byarea$cycle =="2",]
+basalarea_byarea_2ndcycle_summ<-basalarea_byarea_2ndcycle %>%
+  dplyr::select(simp_plot,basal_ft2_ac) %>%
+  group_by(simp_plot) %>%
+  summarise(basal_ft2_ac_total=sum(basal_ft2_ac))
+
+basal_ft2_ac_score<-basalarea_byarea_2ndcycle_summ$basal_ft2_ac_total
+basal_ft2_ac_score[basal_ft2_ac_score < 110] <- 1
+basal_ft2_ac_score[basal_ft2_ac_score > 110 & basal_ft2_ac_score < 179.99999]<- 2
+basal_ft2_ac_score[basal_ft2_ac_score > 180]<- 3
+
+basalarea_byarea_2ndcycle_summ$basal_ft2_ac_score<-basal_ft2_ac_score
+
+Covars_oldgrowth_basalarea<-Covars_oldgrowth %>%
+  left_join(basalarea_byarea_2ndcycle_summ, by="simp_plot") %>%
+  mutate(across(everything(), ~replace_na(.x, 1)))
+
+```
+
+## d. numerous large trees 
+
+60 cm trees; 1-3, 4-6 or > 7.
+
+```{r}
+dbh_information<-read.csv("dbh_information.csv",header=T)
+dbh_information_2ndcycle<-dbh_information[dbh_information$id =="2",]
+dbh_information_2ndcycle_largetrees<-dbh_information_2ndcycle[dbh_information_2ndcycle$dbh_class_index == "11",]
+dbh_information_2ndcycle_largetrees_over60cm<-dbh_information_2ndcycle_largetrees[dbh_information_2ndcycle_largetrees$count > 59.9999,]
+dbh_information_2ndcycle_largetrees_over60cm$simp_plot<-dbh_information_2ndcycle_largetrees_over60cm$plot
+dbh_information_2ndcycle_summ<-dbh_information_2ndcycle_largetrees_over60cm %>%
+  dplyr::select(simp_plot,count) %>%
+  group_by(simp_plot) %>%
+  count()
+
+dbh_information_2ndcycle_summ$dbh_score<-dbh_information_2ndcycle_summ$n
+
+dbh_information_2ndcycle_summ$dbh_score[dbh_information_2ndcycle_summ$dbh_score<1]<-0
+dbh_information_2ndcycle_summ$dbh_score[dbh_information_2ndcycle_summ$dbh_score>0 & dbh_information_2ndcycle_summ$dbh_score < 4]<-1
+dbh_information_2ndcycle_summ$dbh_score[dbh_information_2ndcycle_summ$dbh_score>3 & dbh_information_2ndcycle_summ$dbh_score < 7]<-2
+dbh_information_2ndcycle_summ$dbh_score[dbh_information_2ndcycle_summ$dbh_score>6]<-3
+
+
+
+
+Covars_oldgrowth_basalarea_dbhcount<-Covars_oldgrowth_basalarea %>%
+  left_join(dbh_information_2ndcycle_summ, by="simp_plot") %>%
+  mutate(across(everything(), ~replace_na(.x, 0)))
+
+```
+
+
+# 5. creating an aggregate "old growth" score
+
+Now, let's create an aggregate old growth score.
+
+```{r}
+oldgrowthscore<-data.frame(Covars_oldgrowth_basalarea_dbhcount$simp_plot,Covars_oldgrowth_basalarea_dbhcount$cwd_score+Covars_oldgrowth_basalarea_dbhcount$macro_simplified+Covars_oldgrowth_basalarea_dbhcount$basal_ft2_ac_score+Covars_oldgrowth_basalarea_dbhcount$dbh_score)
+
+colnames(oldgrowthscore)<-c("simp_plot","oldgrowthscore")
+oldgrowthscore$cwd_diversity_score<-Covars_oldgrowth_basalarea_dbhcount$cwd_score
+oldgrowthscore$depressions_score<-Covars_oldgrowth_basalarea_dbhcount$macro_simplified
+oldgrowthscore$basalarea_score<-Covars_oldgrowth_basalarea_dbhcount$basal_ft2_ac_score
+oldgrowthscore$largetreefrequency_score<-Covars_oldgrowth_basalarea_dbhcount$dbh_score
+
+coordinates<-data.frame(Flinncovariates$simp_plot,Flinncovariates$longitude,Flinncovariates$latitude)
+colnames(coordinates)<-c("simp_plot","x","y")
+
+oldgrowthscore$simp_plot<-as.numeric(oldgrowthscore$simp_plot)
+coordinates$simp_plot<-as.numeric(coordinates$simp_plot)
+oldgrowthscore_coords<-oldgrowthscore %>% left_join(coordinates,by="simp_plot")
+
+
+communities<-data.frame(Flinncovariates$simp_plot,Flinncovariates$community)
+colnames(communities)<-c("simp_plot","community")
+
+oldgrowthscore_coords_comm<-oldgrowthscore_coords %>%
+  left_join(communities,by="simp_plot")
+
+write.csv(oldgrowthscore_coords,"oldgrowthscore.csv")
+```
+
+Let's visualize this briefly.
+
+```{r}
+p<-ggplot(aes(x=x,y=y,col=oldgrowthscore,label=simp_plot),data=oldgrowthscore_coords)+geom_point()+scale_color_viridis_c()
+p
+
+```
+
+This distribution looks a little...funky, shall we say? Saying that an old growth forest exists near OEC is a bit surprising, to say the least. Thanks to discussions with John R., the likely culprit here is due to some strange behaviors for Bottomland Forests, which tend to have lots of downed woody debris and LOTS of big trees (cottonwoods).
+
+```{r}
+p<-ggplot(aes(x=x,y=y,col=community,label=simp_plot),data=oldgrowthscore_coords_comm)+geom_point()+scale_color_viridis_d()
+p
+```
+
+
+Given some initial, weird outcomes with bottomland forests, we can also subset out only our focal forest types - Sugar Maple - Mixed Hardwoods, Beech - Mixed Hardwood (Hemlock) Forest, and Oak - Mixed Hardwood. 
+
+```{r}
+oldgrowthscore_coords_comm_forestsub<-oldgrowthscore_coords_comm[oldgrowthscore_coords_comm$community %in% c("Sugar Maple - Mixed Hardwood Forest", "Beech - Mixed Hardwood (Hemlock) Forest", "Oak - Mixed Hardwood"),]
+
+write.csv(oldgrowthscore_coords_comm_forestsub,"oldgrowthscore_forestsub.csv")
+
+p<-ggplot(aes(x=x,y=y,col=oldgrowthscore,label=simp_plot),data=oldgrowthscore_coords_comm_forestsub)+geom_point()+scale_color_viridis_c()
+p
+
+```
+
+This looks a bit more reasonable. Let's subset to only higher values (7 and above).
+
+```{r}
+
+oldgrowthscore_coords_comm_forestsub_highscore<-oldgrowthscore_coords_comm_forestsub[oldgrowthscore_coords_comm_forestsub$oldgrowthscore > 6,]
+
+p<-ggplot(aes(x=x,y=y),data=oldgrowthscore_coords)+geom_point(col="black")+geom_point(aes(col=oldgrowthscore),data=oldgrowthscore_coords_comm_forestsub_highscore,size=3)+scale_color_viridis_c(begin=0.6,option = "A")
+p
+```
+
+Now, let's subset to our highest values (9 and 10).
+
+```{r}
+oldgrowthscore_coords_comm_forestsub_highestscore<-oldgrowthscore_coords_comm_forestsub[oldgrowthscore_coords_comm_forestsub$oldgrowthscore > 8,]
+
+p<-ggplot(aes(x=x,y=y),data=oldgrowthscore_coords)+geom_point(col="black")+geom_point(aes(col=oldgrowthscore),data=oldgrowthscore_coords_comm_forestsub_highestscore,size=3)+scale_color_viridis_c(begin=0.8,option = "A")
+p
+```
+
+Some of our most "old growth"-like locations are in Bradley Woods, Rocky River, North Chagrin, and South Chagrin. 
+
+# 4. Ordinations
+
+Now that we have a suite of covariates related to old growth forests, let's explore these in multivariate space - using (at least initially!) PCA. 
+
+```{r}
+
+Covars_forord<-Covars_oldgrowth_basalarea_dbhcount %>%
+  dplyr::select(-cwd_score,-macro_simplified,-basal_ft2_ac_score,-dbh_score)
+Covars_forord$above60cm<-as.numeric(Covars_forord$n)
+
+Covars_forord<-Covars_forord %>%
+  dplyr::select(-n) %>%
+  column_to_rownames("simp_plot")
+
+ord<-rda(Covars_forord,scale=T)
+screeplot(ord)
+
+biplot(ord,
+       display = c("sites", 
+                   "species"),
+       type = c("text",
+                "points"))
+
+rda_scores <- scores(ord,choices = 1:3)
+rda_scores$species
+
+```
+
+Based on this, PC1 - which explains the most variance - assigns negative values to plots with larger trees, typically. 
+
+# Clustering
+
+We can also identify clusters in these old growth forest covariates. 
+
+https://rpubs.com/Bury/ClusteringOnPcaResults
+
+```{r}
+xxx.pca1<-prcomp(Covars_forord, center=FALSE, scale.=FALSE, rank. = 4) # stats::
+results <- xxx.pca1$x
+fviz_nbclust(results, FUNcluster=kmeans, k.max = 7)
+fviz_nbclust(results, FUNcluster=kmeans, method="gap_stat", k.max  = 7)+ theme_classic() # factoextra::
+km1<-eclust(results, "kmeans", hc_metric="euclidean",k=2)
+fviz_silhouette(km1) 
+
+clusters<-km1$cluster
+
+biplot(ord,
+       display = c("sites", 
+                   "species"),
+       type = c("text",
+                "text"))
+ordihull(ord,groups = clusters, col=c(1,2), lwd=3)
+
+
+```
+
+Two general clusters - one (black) primarily includes plots with larger trees, and the other - red - which includes more subcanopy trees. Let's plot this with community types instead.
+
+```{r}
+biplot(ord,
+       display = c("sites", 
+                   "species"),
+       type = c("text",
+                "text"))
+ordihull(ord,groups = communities$community, col=c(1,2,3,4,5,6,7,8,9,10), lwd=3)
+```
+
+The two communities that seem to be more "black cluster"-associated are Sugar-Maple Mixed Hardwood (gray) and Bottomland Forest (red, in this ordination). This does seem to argue for the need to exclude bottomland forests in explorations of "old growth" forest dynamics.
+
+
+<div class="alert alert-success">
+*In summary:*
+
+*A. In urban settings, you absolutely need to focus solely on forest community types that could be old growth; otherwise, some ruderal/flooded habitats may appear "old growth"-like.*
+*B. After focusing in on our focal community types, there are a few plots that appear to be candidate old growth sites.*
+
+Should you have any questions or suggestions for this markdown, please send them to: nwb@clevelandmetroparks.com. Thank you!
+</div>
+
