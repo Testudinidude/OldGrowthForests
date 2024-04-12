@@ -145,20 +145,31 @@ Covars_oldgrowth<-Flinncovariates %>%
 2 = 2 decay classes
 3 = 3 or more decay classes
 
+We do not have decay classes, but counts per size class of CWD. We should likely just use binned counts of the highest size class (40 cm and above). 
+
+1 = 0 large CWD (average)
+2 = 0 - 1 large CWD (average)
+3 = > 1 large CWD (average)
+
 ```{r}
 
-cwd_class1<-Covars_oldgrowth$cwd_2to12cm_mean 
-cwd_class2<-Covars_oldgrowth$cwd_12to40cm_mean 
+#cwd_class1<-Covars_oldgrowth$cwd_2to12cm_mean 
+#cwd_class2<-Covars_oldgrowth$cwd_12to40cm_mean 
 cwd_class3<-Covars_oldgrowth$cwd_greater_than_40cm_mean 
 
-cwd_classes<-data.frame(cwd_class1,cwd_class2,cwd_class3) %>% mutate_if(is.numeric, ~1 * (. > 0))
+#cwd_classes<-data.frame(cwd_class1,cwd_class2,cwd_class3) %>% mutate_if(is.numeric, ~1 * (. > 0))
 
-cwd_combined<-cwd_classes$cwd_class1+cwd_classes$cwd_class2+cwd_classes$cwd_class3
+#cwd_combined<-cwd_classes$cwd_class1+cwd_classes$cwd_class2+cwd_classes$cwd_class3
+
+cwd_large<-cwd_class3
+cwd_large[cwd_large > 1]<- 3
+cwd_large[cwd_large > 0 & cwd_large < 1]<- 2
+cwd_large[cwd_large == 0] <- 1
 
 
 Covars_oldgrowth <- Covars_oldgrowth %>%
   rownames_to_column("simp_plot")
-Covars_oldgrowth$cwd_score<-cwd_combined
+Covars_oldgrowth$cwd_score<-cwd_large
 
 ```
 
@@ -313,16 +324,16 @@ p<-ggplot(aes(x=x,y=y),data=oldgrowthscore_coords)+geom_point(col="black")+geom_
 p
 ```
 
-Now, let's subset to our highest values (9 and 10).
+Now, let's subset to our highest values (8-9).
 
 ```{r}
-oldgrowthscore_coords_comm_forestsub_highestscore<-oldgrowthscore_coords_comm_forestsub[oldgrowthscore_coords_comm_forestsub$oldgrowthscore > 8,]
+oldgrowthscore_coords_comm_forestsub_highestscore<-oldgrowthscore_coords_comm_forestsub[oldgrowthscore_coords_comm_forestsub$oldgrowthscore > 7,]
 
 p<-ggplot(aes(x=x,y=y),data=oldgrowthscore_coords)+geom_point(col="black")+geom_point(aes(col=oldgrowthscore),data=oldgrowthscore_coords_comm_forestsub_highestscore,size=3)+scale_color_viridis_c(begin=0.8,option = "A")
 p
 ```
 
-Some of our most "old growth"-like locations are in Bradley Woods, Rocky River, North Chagrin, and South Chagrin. 
+Some of our most "old growth"-like locations are in Rocky River, North Chagrin, and South Chagrin. 
 
 # 4. Ordinations
 
